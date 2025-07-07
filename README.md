@@ -56,7 +56,7 @@ const YOUTUBE_CHANNEL_ID = 'ใส่ YouTube Channel ID';
 
 #### 🔍 วิธีหา Discord Bot Token:
 1. ไปที่ [Discord Developer Portal](https://discord.com/developers/applications)
-2. สร้าง Application → เพิ่ม Bot → Copy Token
+2. สร้าง Application → Bot → Copy Token
 
 ---
 

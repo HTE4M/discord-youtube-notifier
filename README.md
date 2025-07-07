@@ -58,6 +58,7 @@ const YOUTUBE_CHANNEL_ID = 'ใส่ YouTube Channel ID';
 1. ไปที่ [Discord Developer Portal](https://discord.com/developers/applications)
 2. สร้าง Application → Bot → Copy Token
 3. เปิด Privileged Gateway Intents หรือ เปิด Presence Intent, Server Members Intent, Message Content Intent
+4. เชิญ bot เข้า discord server https://discord.com/oauth2/authorize?client_id=(ใส่ Client ID ของบอท)&scope=bot&permissions=3072
 
 ---
 

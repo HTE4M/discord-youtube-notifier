@@ -31,7 +31,7 @@ cd discord-youtube-notifier
 ### 3️⃣ ติดตั้ง dependencies
 
 ```bash
-npm install discord.js axios xml2js sqlite3
+npm install discord.js axios xml2js sqlite sqlite3 dotenv
 ```
 
 ### 4️⃣ ตั้งค่าข้อมูลใน `index.js`
@@ -40,7 +40,7 @@ npm install discord.js axios xml2js sqlite3
 
 ```javascript
 const config = {
-  token: 'ใส่ Discord Bot Token ของคุณ',
+  token: process.env.DISCORD_TOKEN, // Token บอท Discord เก็บใน .env
   announceChannelId: 'ใส่ Channel ID ห้องประกาศ',
   youtubeChannelId: 'ใส่ YouTube Channel ID',
   checkInterval: 300000,

@@ -108,50 +108,50 @@ async function checkYouTube() {
       return;
     }
 
-    const latest = parsed.feed.entry[0]; // วิดีโอล่าสุด
-    const videoId = latest['yt:videoId'][0];
-    const videoTitle = latest.title[0];
     const announceChannel = client.channels.cache.get(config.announceChannelId);
-    const titleLower = videoTitle.toLowerCase();
 
-    // ตรวจสอบว่าคลิปนี้ถูกบันทึกไว้แล้วหรือไม่
-    db.get(`SELECT videoId FROM videos WHERE videoId = ?`, [videoId], (err, row) => {
-      if (err) return console.error(`❌ DB error: ${err.message}`);
+    // วนลูปทุกวิดีโอใน feed
+    parsed.feed.entry.forEach(entry => {
+      const videoId = entry['yt:videoId'][0];
+      const videoTitle = entry.title[0];
+      const titleLower = videoTitle.toLowerCase();
 
-      if (row) {
-        // มีแล้ว ไม่ต้องประกาศซ้ำ
-        console.log(`⏸️ ไม่พบวิดีโอใหม่`);
-      } else {
-        // ยังไม่มีในฐานข้อมูล แสดงว่าคลิปใหม่
-        if (titleLower.includes('#live')) {
-          // ถ้าเป็นไลฟ์
-          sendAnnouncement(
-            announceChannel,
-            `🔴 ไลฟ์ใหม่บน YouTube: **${videoTitle}**\nhttps://youtu.be/${videoId}`,
-            `🔴 พบไลฟ์ใหม่: ${videoTitle}`
-          );
-        } else if (titleLower.includes('#shorts')) {
-          // ถ้าเป็น Shorts
-          sendAnnouncement(
-            announceChannel,
-            `📱 Shorts ใหม่บน YouTube: **${videoTitle}**\nhttps://www.youtube.com/shorts/${videoId}`,
-            `📱 พบ Shorts ใหม่: ${videoTitle}`
-          );
+      // ตรวจสอบว่าคลิปนี้มีอยู่ในฐานข้อมูลหรือยัง
+      db.get(`SELECT videoId FROM videos WHERE videoId = ?`, [videoId], (err, row) => {
+        if (err) return console.error(`❌ DB error: ${err.message}`);
+
+        if (row) {
+          // มีแล้ว ข้าม
+          console.log(`⏸️ ${videoTitle} - มีอยู่แล้ว`);
         } else {
-          // วิดีโอทั่วไป
-          sendAnnouncement(
-            announceChannel,
-            `🎥 คลิปใหม่บน YouTube: **${videoTitle}**\nhttps://youtu.be/${videoId}`,
-            `🎥 พบคลิปใหม่: ${videoTitle}`
-          );
-        }
+          // ยังไม่มี → ประกาศ
+          if (titleLower.includes('#live')) {
+            sendAnnouncement(
+              announceChannel,
+              `🔴 ไลฟ์ใหม่บน YouTube: **${videoTitle}**\nhttps://youtu.be/${videoId}`,
+              `🔴 พบไลฟ์ใหม่: ${videoTitle}`
+            );
+          } else if (titleLower.includes('#shorts')) {
+            sendAnnouncement(
+              announceChannel,
+              `📱 Shorts ใหม่บน YouTube: **${videoTitle}**\nhttps://www.youtube.com/shorts/${videoId}`,
+              `📱 พบ Shorts ใหม่: ${videoTitle}`
+            );
+          } else {
+            sendAnnouncement(
+              announceChannel,
+              `🎥 คลิปใหม่บน YouTube: **${videoTitle}**\nhttps://youtu.be/${videoId}`,
+              `🎥 พบคลิปใหม่: ${videoTitle}`
+            );
+          }
 
-        // บันทึก videoId ใหม่ลงฐานข้อมูล
-        db.run(`INSERT INTO videos (videoId) VALUES (?)`, [videoId], err => {
-          if (err) console.error(`❌ บันทึก videoId ไม่สำเร็จ: ${err.message}`);
-          else logTotalVideos();
-        });
-      }
+          // บันทึก videoId ลงฐานข้อมูล
+          db.run(`INSERT INTO videos (videoId) VALUES (?)`, [videoId], err => {
+            if (err) console.error(`❌ บันทึก videoId ไม่สำเร็จ: ${err.message}`);
+            else logTotalVideos();
+          });
+        }
+      });
     });
   } catch (error) {
     console.error(`❌ เช็ค YouTube ไม่ได้:`, error.message);

@@ -1,126 +1,149 @@
-require('dotenv').config(); // โหลดค่า environment variables จาก .env
-const { Client, GatewayIntentBits } = require('discord.js'); // นำเข้า discord.js
-const axios = require('axios'); // สำหรับดึงข้อมูล HTTP
-const xml2js = require('xml2js'); // แปลง XML เป็น JSON
-const sqlite = require('sqlite'); // ใช้งาน SQLite แบบ promise
-const sqlite3 = require('sqlite3'); // ไดร์เวอร์ SQLite
+// โหลด environment variables จาก .env
+require('dotenv').config();
 
-// กำหนดค่าคอนฟิกต่างๆ ของบอท
+// import module ที่จำเป็น
+const { Client, GatewayIntentBits } = require('discord.js');
+const axios = require('axios');
+const xml2js = require('xml2js');
+const sqlite = require('sqlite');
+const sqlite3 = require('sqlite3');
+const fs = require('fs');
+const path = require('path');
+
+// 📌 config การตั้งค่าของระบบ
 const config = {
-  token: process.env.DISCORD_TOKEN, // Token บอท Discord เก็บใน .env
+  token: process.env.DISCORD_TOKEN, // ดึง token จาก .env
   announceChannelId: 'YOUR_ANNOUNCE_CHANNEL_ID', // ID ช่องสำหรับโพสต์แจ้งเตือน
   youtubeChannelId: 'YOUR_YOUTUBE_CHANNEL_ID', // ช่อง YouTube ที่ต้องการตรวจสอบ
-  checkInterval: 300000, // เวลาระหว่างตรวจสอบ (5 นาที)
-  dbFile: 'videos.db' // ไฟล์ SQLite สำหรับเก็บ videoId
+  checkInterval: 300000, // ระยะเวลาเช็กวิดีโอทุก 5 นาที (หน่วยเป็น ms)
+  dbFile: 'videos.db' // ชื่อไฟล์ database SQLite
 };
 
-// สร้าง client Discord พร้อมระบุ intents ที่ต้องการ
+// 📌 สร้าง client Discord
 const client = new Client({
   intents: [
-    GatewayIntentBits.Guilds, // ใช้งาน guild (เซิร์ฟเวอร์)
-    GatewayIntentBits.GuildMessages, // อ่านข้อความใน guild
-    GatewayIntentBits.MessageContent // อ่านเนื้อหาข้อความ (message content)
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages
   ]
 });
 
-let db; // ตัวแปรเก็บฐานข้อมูล SQLite
+// ตัวแปร db สำหรับเชื่อมต่อฐานข้อมูล
+let db;
 
-// ฟังก์ชันช่วยคืนเวลาปัจจุบันใน timezone กรุงเทพฯ
+// 📌 คืน timestamp ปัจจุบัน (เวลาประเทศไทย)
 function getTimestamp() {
   return new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
 }
 
-// ฟังก์ชันส่งข้อความแจ้งเตือนในช่อง Discord และพิมพ์ log
+// 📌 คืน path ของ log file ตามวันที่ (สร้างโฟลเดอร์ logs อัตโนมัติ)
+function getLogFilePath() {
+  const now = new Date();
+  const dateStr = now.toISOString().split('T')[0]; // yyyy-mm-dd
+  const logDir = path.join(__dirname, 'logs');
+  if (!fs.existsSync(logDir)) {
+    fs.mkdirSync(logDir);
+  }
+  return path.join(logDir, `${dateStr}.log`);
+}
+
+// 📌 เขียน log ลง console และไฟล์ log
+function writeLog(message) {
+  const logLine = `[${getTimestamp()}] ${message}\n`;
+  console.log(logLine.trim());
+  fs.appendFile(getLogFilePath(), logLine, err => {
+    if (err) console.error(`❌ เขียน log ลงไฟล์ไม่สำเร็จ: ${err.message}`);
+  });
+}
+
+// 📌 ส่งข้อความประกาศไปยัง Discord channel พร้อม log
 async function sendAnnouncement(channel, message, log) {
   if (channel) {
     await channel.send(message);
-    console.log(`[${getTimestamp()}] ${log}`);
+    writeLog(log);
   } else {
-    console.log(`❌ ไม่พบ announceChannel ID: ${config.announceChannelId}`);
+    writeLog(`❌ ไม่พบ announceChannel ID: ${config.announceChannelId}`);
   }
 }
 
-// ฟังก์ชันโหลด YouTube feed พร้อมระบบ retry (3 ครั้ง) กรณีล้มเหลว
-async function fetchYouTubeFeedWithRetry(retries = 3, delay = 1000) {
+// 📌 ดึง YouTube Feed พร้อมระบบ retry หากเกิด error
+async function fetchYouTubeFeedWithRetry(retries = 3, delay = 1000, totalTimeLimit = 10000) {
+  const startTime = Date.now();
+
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      // ดึง feed แบบ XML
       const res = await axios.get(`https://www.youtube.com/feeds/videos.xml?channel_id=${config.youtubeChannelId}`);
-      // แปลง XML เป็น JSON
       return xml2js.parseStringPromise(res.data);
     } catch (error) {
-      console.warn(`⚠️ โหลด YouTube feed ล้มเหลว (attempt ${attempt}): ${error.message}`);
+      const elapsed = Date.now() - startTime;
+      writeLog(`⚠️ โหลด YouTube feed ล้มเหลว (attempt ${attempt}): ${error.message}`);
+
+      if (elapsed >= totalTimeLimit) {
+        writeLog(`⛔ เวลาโหลดรวมเกิน ${totalTimeLimit / 1000} วินาที ยกเลิก`);
+        throw error;
+      }
+
       if (attempt < retries) {
-        // รอเวลา delay * attempt (เพิ่มขึ้นเรื่อยๆ) ก่อนลองใหม่
         await new Promise(res => setTimeout(res, delay * attempt));
       } else {
-        // ถ้า retry ครบแล้วแต่ยังล้มเหลว ให้ throw error ออกไป
         throw error;
       }
     }
   }
 }
 
-// ฟังก์ชันแสดงจำนวนวิดีโอที่บันทึกในฐานข้อมูล
+// 📌 log จำนวน videoId ที่บันทึกไว้ในฐานข้อมูล
 async function logTotalVideos() {
   const row = await db.get(`SELECT COUNT(*) AS count FROM videos`);
-  console.log(`✅ เก็บ videoId ปัจจุบัน ${row.count} รายการ`);
+  writeLog(`✅ เก็บ videoId ปัจจุบัน ${row.count} รายการ`);
 }
 
-// โหลด videoId ทั้งหมดจาก YouTube feed ครั้งแรกตอนบอทเริ่มทำงาน
+// 📌 โหลด videoId ทั้งหมดใน channel ลง database เมื่อบอทเปิดใหม่
 async function preloadYouTubeVideos() {
-  console.log(`📦 [${getTimestamp()}] กำลังโหลด videoId ทั้งหมดครั้งแรก...`);
+  writeLog(`📦 กำลังโหลด videoId ทั้งหมดครั้งแรก...`);
   try {
     const parsed = await fetchYouTubeFeedWithRetry();
-
-    // ถ้าไม่มีวิดีโอใน feed
     if (!parsed.feed.entry?.length) {
-      console.log(`📭 ยังไม่มีวิดีโอ`);
+      writeLog(`📭 ยังไม่มีวิดีโอ`);
       return;
     }
 
-    // ดึง videoId ทั้งหมดจาก feed
     const videoIds = parsed.feed.entry.map(video => video['yt:videoId'][0]);
 
-    // บันทึก videoId ลงฐานข้อมูล ถ้ามีอยู่แล้วจะไม่เพิ่มซ้ำ
     for (const videoId of videoIds) {
       await db.run(`INSERT OR IGNORE INTO videos (videoId) VALUES (?)`, videoId);
     }
 
     await logTotalVideos();
   } catch (error) {
-    console.error(`❌ preload videoId ไม่สำเร็จ:`, error.message);
+    writeLog(`❌ preload videoId ไม่สำเร็จ: ${error.message}`);
   }
 }
 
-// ฟังก์ชันตรวจสอบวิดีโอใหม่ใน YouTube feed ทุกๆ 5 นาที
+// 📌 ตรวจสอบ YouTube feed ว่ามีวิดีโอใหม่ไหม
 async function checkYouTube() {
-  console.log(`🔍 [${getTimestamp()}] เช็ค YouTube...`);
+  writeLog(`🔍 เช็ค YouTube...`);
   try {
     const parsed = await fetchYouTubeFeedWithRetry();
-
     if (!parsed.feed.entry?.length) {
-      console.log(`📭 ยังไม่มีวิดีโอ`);
+      writeLog(`📭 ยังไม่มีวิดีโอ`);
       return;
     }
 
     const announceChannel = client.channels.cache.get(config.announceChannelId);
 
-    // วนลูปตรวจทุกวิดีโอใน feed
     for (const entry of parsed.feed.entry) {
       const videoId = entry['yt:videoId'][0];
       const videoTitle = entry.title[0];
       const titleLower = videoTitle.toLowerCase();
 
-      // เช็คในฐานข้อมูลว่ามี videoId นี้แล้วหรือยัง
+      // เช็กว่า videoId นี้อยู่ในฐานข้อมูลหรือยัง
       const row = await db.get(`SELECT videoId FROM videos WHERE videoId = ?`, videoId);
       if (row) {
-        // ถ้ามีแล้ว ไม่ต้องแจ้งซ้ำ
-        console.log(`⏸️ ${videoTitle} - มีอยู่แล้ว`);
+        writeLog(`⏸️ ${videoTitle} - มีอยู่แล้ว`);
         continue;
       }
 
-      // ประเภทวิดีโอ แยกเป็น ไลฟ์, Shorts หรือ คลิปปกติ
+      // ถ้ายังไม่มี → แจ้งเตือนตามประเภทวิดีโอ
       if (titleLower.includes('#live')) {
         await sendAnnouncement(
           announceChannel,
@@ -147,26 +170,26 @@ async function checkYouTube() {
 
     await logTotalVideos();
   } catch (error) {
-    console.error(`❌ เช็ค YouTube ไม่ได้:`, error.message);
+    writeLog(`❌ เช็ค YouTube ไม่ได้: ${error.message}`);
   }
 }
 
-// เมื่อบอทพร้อมใช้งาน (login สำเร็จ)
+// 📌 เมื่อบอทออนไลน์ (พร้อมใช้งาน)
 client.once('ready', async () => {
-  console.log(`✅ Logged in as ${client.user.tag}`);
+  writeLog(`✅ Logged in as ${client.user.tag}`);
 
-  // เปิดฐานข้อมูล SQLite
+  // เชื่อมต่อฐานข้อมูล SQLite
   db = await sqlite.open({ filename: config.dbFile, driver: sqlite3.Database });
 
-  // สร้างตาราง videos หากยังไม่มี
+  // สร้าง table videos ถ้ายังไม่มี
   await db.run(`CREATE TABLE IF NOT EXISTS videos (videoId TEXT PRIMARY KEY)`);
 
-  // โหลด videoId ทั้งหมดจาก YouTube feed ครั้งแรก
+  // โหลด videoId ทั้งหมดครั้งแรก
   await preloadYouTubeVideos();
 
-  // ตั้ง interval ตรวจสอบ YouTube ทุกๆ 5 นาที
+  // ตั้ง interval เช็ควิดีโอทุกระยะ
   setInterval(checkYouTube, config.checkInterval);
 });
 
-// เริ่มล็อกอินบอทด้วย token
+// 📌 login เข้า Discord
 client.login(config.token);

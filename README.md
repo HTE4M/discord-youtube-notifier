@@ -116,6 +116,7 @@ https://youtu.be/[videoId]
 
 | ไฟล์                  | รายละเอียด                          |
 |:----------------------|:-------------------------------------|
+| `.env`             | ไฟล์เก็บ Token บอท Discord                |
 | `index.js`             | ไฟล์หลักของระบบบอท                 |
 | `videos.db`    | ฐานข้อมูล SQLite เก็บ videoId      |
 | `package.json`         | กำหนด dependencies (ถ้ามี)         |

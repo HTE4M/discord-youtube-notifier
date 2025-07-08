@@ -66,7 +66,7 @@ async function fetchYouTubeFeedWithRetry(retries = 3, delay = 1000, totalTimeLim
   const startTime = Date.now();
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      const res = await axios.get(`https://www.youtube.com/feeds/videos.xml?channel_id=${config.youtubeChannelId}`);
+      const res = await axios.get(`https://www.youtube.com/feeds/videos.xml?channel_id=${config.youtubeChannelId}&_=${Date.now()}`);
       return xml2js.parseStringPromise(res.data);
     } catch (error) {
       const elapsed = Date.now() - startTime;

@@ -1,7 +1,4 @@
-// โหลด environment variables จาก .env
 require('dotenv').config();
-
-// import module ที่จำเป็น
 const { Client, GatewayIntentBits } = require('discord.js');
 const axios = require('axios');
 const xml2js = require('xml2js');
@@ -10,43 +7,40 @@ const sqlite3 = require('sqlite3');
 const fs = require('fs');
 const path = require('path');
 
-// 📌 config การตั้งค่าของระบบ
+// 📌 Config ระบบ
 const config = {
-  token: process.env.DISCORD_TOKEN, // ดึง token จาก .env
+  token: process.env.DISCORD_TOKEN, // token bot จาก .env
   announceChannelId: 'YOUR_ANNOUNCE_CHANNEL_ID', // ID ช่องสำหรับโพสต์แจ้งเตือน
   youtubeChannelId: 'YOUR_YOUTUBE_CHANNEL_ID', // ช่อง YouTube ที่ต้องการตรวจสอบ
-  checkInterval: 300000, // ระยะเวลาเช็กวิดีโอทุก 5 นาที (หน่วยเป็น ms)
-  dbFile: 'videos.db' // ชื่อไฟล์ database SQLite
+  checkInterval: 300000, // เช็คทุก 5 นาที (300000 ms)
+  dbFile: 'videos.db' // ไฟล์ database SQLite
 };
 
-// 📌 สร้าง client Discord
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
   ]
 });
 
-// ตัวแปร db สำหรับเชื่อมต่อฐานข้อมูล
-let db;
+let db; // ตัวแปรเก็บ database instance
 
-// 📌 คืน timestamp ปัจจุบัน (เวลาประเทศไทย)
+// 📌 คืน timestamp ปัจจุบัน (ตามเวลาไทย)
 function getTimestamp() {
   return new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
 }
 
-// 📌 คืน path ของ log file ตามวันที่ (สร้างโฟลเดอร์ logs อัตโนมัติ)
+// 📌 คืน path ไฟล์ log ตามวัน
 function getLogFilePath() {
   const now = new Date();
-  const dateStr = now.toISOString().split('T')[0]; // yyyy-mm-dd
+  const dateStr = now.toISOString().split('T')[0];
   const logDir = path.join(__dirname, 'logs');
-  if (!fs.existsSync(logDir)) {
-    fs.mkdirSync(logDir);
-  }
+  if (!fs.existsSync(logDir)) fs.mkdirSync(logDir);
   return path.join(logDir, `${dateStr}.log`);
 }
 
-// 📌 เขียน log ลง console และไฟล์ log
+// 📌 เขียน log ลง console + ไฟล์ log
 function writeLog(message) {
   const logLine = `[${getTimestamp()}] ${message}\n`;
   console.log(logLine.trim());
@@ -55,7 +49,7 @@ function writeLog(message) {
   });
 }
 
-// 📌 ส่งข้อความประกาศไปยัง Discord channel พร้อม log
+// 📌 ส่งประกาศ Discord + เขียน log
 async function sendAnnouncement(channel, message, log) {
   if (channel) {
     await channel.send(message);
@@ -65,10 +59,9 @@ async function sendAnnouncement(channel, message, log) {
   }
 }
 
-// 📌 ดึง YouTube Feed พร้อมระบบ retry หากเกิด error
+// 📌 ดึง YouTube Feed พร้อมระบบ retry
 async function fetchYouTubeFeedWithRetry(retries = 3, delay = 1000, totalTimeLimit = 10000) {
   const startTime = Date.now();
-
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       const res = await axios.get(`https://www.youtube.com/feeds/videos.xml?channel_id=${config.youtubeChannelId}`);
@@ -76,12 +69,10 @@ async function fetchYouTubeFeedWithRetry(retries = 3, delay = 1000, totalTimeLim
     } catch (error) {
       const elapsed = Date.now() - startTime;
       writeLog(`⚠️ โหลด YouTube feed ล้มเหลว (attempt ${attempt}): ${error.message}`);
-
       if (elapsed >= totalTimeLimit) {
         writeLog(`⛔ เวลาโหลดรวมเกิน ${totalTimeLimit / 1000} วินาที ยกเลิก`);
         throw error;
       }
-
       if (attempt < retries) {
         await new Promise(res => setTimeout(res, delay * attempt));
       } else {
@@ -91,16 +82,21 @@ async function fetchYouTubeFeedWithRetry(retries = 3, delay = 1000, totalTimeLim
   }
 }
 
-// 📌 log จำนวน videoId ที่บันทึกไว้ในฐานข้อมูล
-async function logTotalVideos() {
+// 📌 log จำนวน videoId ทั้งหมด และจำนวน video ใหม่ล่าสุด
+async function logTotalVideos(beforeCount) {
   const row = await db.get(`SELECT COUNT(*) AS count FROM videos`);
-  writeLog(`✅ เก็บ videoId ปัจจุบัน ${row.count} รายการ`);
+  const afterCount = row.count;
+  const newVideos = afterCount - beforeCount;
+  writeLog(`✅ videoId ปัจจุบัน ${afterCount} รายการ (+${newVideos} รายการใหม่)`);
 }
 
-// 📌 โหลด videoId ทั้งหมดใน channel ลง database เมื่อบอทเปิดใหม่
+// 📌 preload videoId ทั้งหมดตอนบอทเปิด
 async function preloadYouTubeVideos() {
   writeLog(`📦 กำลังโหลด videoId ทั้งหมดครั้งแรก...`);
   try {
+    const beforeRow = await db.get(`SELECT COUNT(*) AS count FROM videos`);
+    const beforeCount = beforeRow.count;
+
     const parsed = await fetchYouTubeFeedWithRetry();
     if (!parsed.feed.entry?.length) {
       writeLog(`📭 ยังไม่มีวิดีโอ`);
@@ -113,16 +109,19 @@ async function preloadYouTubeVideos() {
       await db.run(`INSERT OR IGNORE INTO videos (videoId) VALUES (?)`, videoId);
     }
 
-    await logTotalVideos();
+    await logTotalVideos(beforeCount);
   } catch (error) {
     writeLog(`❌ preload videoId ไม่สำเร็จ: ${error.message}`);
   }
 }
 
-// 📌 ตรวจสอบ YouTube feed ว่ามีวิดีโอใหม่ไหม
+// 📌 เช็ค YouTube Feed ว่ามีวิดีโอใหม่ไหม
 async function checkYouTube() {
   writeLog(`🔍 เช็ค YouTube...`);
   try {
+    const beforeRow = await db.get(`SELECT COUNT(*) AS count FROM videos`);
+    const beforeCount = beforeRow.count;
+
     const parsed = await fetchYouTubeFeedWithRetry();
     if (!parsed.feed.entry?.length) {
       writeLog(`📭 ยังไม่มีวิดีโอ`);
@@ -136,27 +135,30 @@ async function checkYouTube() {
       const videoTitle = entry.title[0];
       const titleLower = videoTitle.toLowerCase();
 
-      // เช็กว่า videoId นี้อยู่ในฐานข้อมูลหรือยัง
       const row = await db.get(`SELECT videoId FROM videos WHERE videoId = ?`, videoId);
       if (row) {
         writeLog(`⏸️ ${videoTitle} - มีอยู่แล้ว`);
         continue;
       }
 
-      // ถ้ายังไม่มี → แจ้งเตือนตามประเภทวิดีโอ
+      // 📌 ถ้า #live ใน title
       if (titleLower.includes('#live')) {
         await sendAnnouncement(
           announceChannel,
           `🔴 ไลฟ์ใหม่บน YouTube: **${videoTitle}**\nhttps://youtu.be/${videoId}`,
           `🔴 พบไลฟ์ใหม่: ${videoTitle}`
         );
-      } else if (titleLower.includes('#shorts')) {
+      }
+      // 📌 ถ้า #shorts ใน title
+      else if (titleLower.includes('#shorts')) {
         await sendAnnouncement(
           announceChannel,
           `📱 Shorts ใหม่บน YouTube: **${videoTitle}**\nhttps://www.youtube.com/shorts/${videoId}`,
           `📱 พบ Shorts ใหม่: ${videoTitle}`
         );
-      } else {
+      }
+      // 📌 วิดีโอปกติ
+      else {
         await sendAnnouncement(
           announceChannel,
           `🎥 คลิปใหม่บน YouTube: **${videoTitle}**\nhttps://youtu.be/${videoId}`,
@@ -164,32 +166,32 @@ async function checkYouTube() {
         );
       }
 
-      // บันทึก videoId ใหม่ลงฐานข้อมูล
       await db.run(`INSERT INTO videos (videoId) VALUES (?)`, videoId);
     }
 
-    await logTotalVideos();
+    await logTotalVideos(beforeCount);
   } catch (error) {
     writeLog(`❌ เช็ค YouTube ไม่ได้: ${error.message}`);
   }
 }
 
-// 📌 เมื่อบอทออนไลน์ (พร้อมใช้งาน)
+// 📌 บอทออนไลน์
 client.once('ready', async () => {
   writeLog(`✅ Logged in as ${client.user.tag}`);
-
-  // เชื่อมต่อฐานข้อมูล SQLite
   db = await sqlite.open({ filename: config.dbFile, driver: sqlite3.Database });
-
-  // สร้าง table videos ถ้ายังไม่มี
   await db.run(`CREATE TABLE IF NOT EXISTS videos (videoId TEXT PRIMARY KEY)`);
 
-  // โหลด videoId ทั้งหมดครั้งแรก
   await preloadYouTubeVideos();
 
-  // ตั้ง interval เช็ควิดีโอทุกระยะ
-  setInterval(checkYouTube, config.checkInterval);
+  // 📌 setInterval ครอบ try-catch กันพัง
+  setInterval(async () => {
+    try {
+      await checkYouTube();
+    } catch (err) {
+      writeLog(`❌ ERROR ใน setInterval: ${err.message}`);
+    }
+  }, config.checkInterval);
 });
 
-// 📌 login เข้า Discord
+// 📌 login เข้าบอท
 client.login(config.token);

@@ -139,7 +139,6 @@ async function checkYouTube() {
       const videoId = entry['yt:videoId'][0];
       const videoTitle = entry.title[0];
       const titleLower = videoTitle.toLowerCase();
-      const videoUrl = `https://youtu.be/${videoId}`;
       const thumbUrl = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
 
       const row = await db.get(`SELECT videoId FROM videos WHERE videoId = ?`, videoId);
@@ -150,12 +149,15 @@ async function checkYouTube() {
       if (titleLower.includes('#live')) {
         label = '🔴 ไลฟ์ใหม่บน YouTube';
         color = 0xff3333;
+        videoUrl = `https://youtu.be/${videoId}`;
       } else if (titleLower.includes('#shorts')) {
         label = '📱 Shorts ใหม่บน YouTube';
         color = 0x33ccff;
+        videoUrl = `https://youtube.com/shorts/${videoId}`;
       } else {
         label = '🎥 คลิปใหม่บน YouTube';
         color = 0xffcc00;
+        videoUrl = `https://youtu.be/${videoId}`;
       }
 
       const embed = new EmbedBuilder()

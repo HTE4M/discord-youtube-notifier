@@ -153,7 +153,7 @@ async function checkYouTube() {
       } else if (titleLower.includes('#shorts')) {
         label = '📱 Shorts ใหม่บน YouTube';
         color = 0x33ccff;
-        videoUrl = `https://youtu.be/shorts/${videoId}`;
+        videoUrl = `https://youtube.com/shorts/${videoId}`;
       } else {
         label = '🎥 คลิปใหม่บน YouTube';
         color = 0xffcc00;
